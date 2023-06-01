@@ -1,103 +1,77 @@
-import express, { application, Application } from 'express';
-import * as fs from 'fs';
-import * as http from 'http';
-import * as https from 'https';
 import cors from 'cors';
-import socketIO from 'socket.io';
+import express from 'express';
+import * as http from 'http';
+import { Server } from 'socket.io';
 import morgan from 'morgan';
 
 // Sockets
+import * as configSocket from './sockets/sockets';
 
-import * as configSocket from '../src/sockets/sockets';
-
+require('module-alias/register');
 require('dotenv').config();
 
 // Global
-import { SERVER_PORT, SERVER_PORT_SSL } from './global/enviroments';
+export const URI_DB = process.env.URIDB;
+export const DB_NAME = process.env.DB_NAME;
+export const URI_FRONT = process.env.LINK_FRONT;
+const port = Number(process.env.PORT);
+
+// DB
+// ********
 
 // Routes
-
 import index from './routes/index.routes';
 
+// import twilio from './routes/twilio.routes';
 // Server
+export default class NServer {
+  private static _instance: NServer;
 
-var key = fs.readFileSync('./src/encryption/privatekey.pem');
-var cert = fs.readFileSync('./src/encryption/server.crt');
-var ca = fs.readFileSync('./src/encryption/csr.pem');
+  public app: express.Application;
+  public port: number;
+  public io: Server;
+  private httpServer: http.Server;
 
-var options = {
-	key: key,
-	cert: cert,
-	ca: ca
-};
+  private constructor() {
+    this.app = express();
+    this.port = port;
+    // Server
+    this.httpServer = http.createServer(this.app);
+    this.io = new Server(this.httpServer);
+    this.listenSockets();
+    this.config();
+    this.routes();
+  }
 
-export default class Server {
-	private static _instance: Server;
+  // Patron Singleton
+  public static get instance() {
+    return this._instance || (this._instance = new this());
+  }
 
-	public app: express.Application;
-	public port: number;
-	public port_SSL: number;
-	public io: socketIO.Server;
-	// Server SSL
-	private httpsServer: https.Server;
-	// Server TSL
-	private httpServer: http.Server;
+  private listenSockets() {
+    console.log('Listen Sockets');
 
-	private constructor() {
-		this.app = express();
-		this.port = SERVER_PORT;
-		this.port_SSL = SERVER_PORT_SSL;
-		// Server SSL
-		this.httpsServer = https.createServer(options, this.app);
-		this.io = socketIO(this.httpsServer);
-		// Server TSL
-		this.httpServer = http.createServer(this.app);
-		this.io = socketIO(this.httpServer);
-		this.listenSockets();
-		this.config();
-		this.routes();
-	}
+    this.io.on('connection', (client) => {
+      this.io.emit('connected');
+      // Conect User
+      console.log('\x1b[0;33m Client Conected');
+      // Disconnect
+      configSocket.disconect(client);
+    });
+  }
 
-	// Patron Singleton
-	public static get instance() {
-		return this._instance || (this._instance = new this());
-	}
+  config(): void {
+    this.app.use(morgan('dev'));
+    this.app.use(express.urlencoded({ limit: '20mb', extended: true })); // TODO Averiguar que es esto
+    this.app.use(express.json());
+    this.app.use(cors({ origin: true, credentials: true }));
+  }
 
-	private listenSockets() {
-		console.log('Listen Sockets');
+  routes(): void {
+    this.app.use('/', index);
+  }
 
-		this.io.on('connection', client => {
-			this.io.emit('connected');
-			// Conect User
-			console.log('\x1b[0;33m Client Conected');
-			// Disconnect
-			configSocket.disconect(client);
-			// =================================================
-			// Event from app Counter
-			// =================================================
-			configSocket.initialPosition(client, this.io);
-
-			configSocket.positionBalon(client, this.io);
-
-			configSocket.goal(client, this.io);
-
-			configSocket.events(client, this.io);
-		});
-	}
-
-	config(): void {
-		this.app.use(morgan('dev'));
-		this.app.use(express.urlencoded({ extended: false }));
-		this.app.use(express.json());
-		this.app.use(cors({ origin: true, credentials: true }));
-	}
-
-	routes(): void {
-		this.app.use('/', index);
-	}
-
-	start(callback: any) {
-		// this.httpsServer.listen(this.port_SSL, callback);
-		this.httpServer.listen(this.port, callback);
-	}
+  start(callback: any) {
+    this.httpServer.listen(this.port, callback);
+  }
 }
